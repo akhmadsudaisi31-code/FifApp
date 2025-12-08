@@ -19,7 +19,7 @@ ChartJS.register(
     Legend
 );
 
-const API_BASE = 'http://localhost:3002/api';
+const API_BASE = 'https://fifapp-production.up.railway.app/api';
 
 export default function Report() {
     const [records, setRecords] = useState([]);

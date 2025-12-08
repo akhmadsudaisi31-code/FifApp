@@ -8,7 +8,7 @@ import Regional from './components/Regional';
 import Room from './components/Room';
 import Report from './components/Report';
 
-const API_BASE = 'http://localhost:3002/api';
+const API_BASE = 'https://fifapp-production.up.railway.app/api';
 
 function App() {
   const [view, setView] = useState('home'); // home | regional | room | laporan
