@@ -1,4 +1,5 @@
 const SPREADSHEET_ID = '1pO_ZyP-iDr0I2EKfWfCv5kNJ5KesVPOdaSCIHC53Ejs';
+const CACHE_EXPIRATION_SEC = 300; // 5 minutes cache
 
 function doGet(e) {
     const action = e.parameter.action;
@@ -6,7 +7,12 @@ function doGet(e) {
     if (action === 'dashboard_init') {
         return handleDashboardInit();
     } else if (action === 'get_records') {
-        return handleGetRecords();
+        // get_records is usually GET, but if we want to pass body for room_id, we might need POST or query param
+        // Let's support both. If query param has room_id, use it.
+        // But handleGetRecords signature in my previous edit was handleGetRecords(body).
+        // Let's make handleGetRecords accept an object.
+        const room_id = e.parameter.room_id;
+        return handleGetRecords({ room_id });
     }
 
     return responseJSON({ error: "Invalid action" });
@@ -46,21 +52,9 @@ function handleDashboardInit() {
         { room_id: "ba", label: "BA", occupancy: 0 }
     ];
 
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-
-    // Default Sheet (NBOT)
-    const defaultSheet = ss.getSheets()[0]; // Assuming first sheet
-    let defaultData = [];
-    if (defaultSheet.getLastRow() >= 2) {
-        defaultData = defaultSheet.getRange("A2:K" + defaultSheet.getLastRow()).getValues();
-    }
-
-    // BA Sheet
-    const baSheet = ss.getSheetByName("BA");
-    let baData = [];
-    if (baSheet && baSheet.getLastRow() >= 2) {
-        baData = baSheet.getRange("B2:M" + baSheet.getLastRow()).getValues();
-    }
+    // Use cached data
+    const defaultData = getDataWithCache('Sheet1', 'A2:K'); // Assuming Sheet1 is default
+    const baData = getDataWithCache('BA', 'B2:M');
 
     // Count complete records
     const completeDefault = defaultData.filter(isDefaultRecordComplete).length;
@@ -76,69 +70,90 @@ function handleDashboardInit() {
 }
 
 function handleEnterRoom(roomId, body) {
-    const { value, date_filter } = body;
+    const { value, date_filter, page = 1, pageSize = 10, reason_filter = 'all' } = body;
     let matched = [];
 
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    // Requirement: If no search query (value), return empty immediately
+    if (!value || value.trim() === '') {
+        return responseJSON({
+            room_id: roomId,
+            matched_records: [],
+            pagination: {
+                total_records: 0,
+                total_pages: 0,
+                current_page: 1,
+                page_size: pageSize
+            }
+        });
+    }
 
     if (roomId === 'ba') {
-        const sheet = ss.getSheetByName("BA");
-        if (sheet) {
-            const lastRow = sheet.getLastRow();
-            if (lastRow >= 2) {
-                const rawRows = sheet.getRange("B2:M" + lastRow).getValues();
-                matched = rawRows.map(mapRowBA);
+        const rawRows = getDataWithCache('BA', 'B2:M');
+        matched = rawRows.map(mapRowBA);
 
-                // Filter
-                if (value && value.trim() !== '') {
-                    const lowerVal = value.toLowerCase();
-                    matched = matched.filter(row =>
-                        (row.G && row.G.toLowerCase().includes(lowerVal)) ||
-                        (row.B && row.B.toLowerCase().includes(lowerVal)) ||
-                        (row.C && row.C.toLowerCase().includes(lowerVal))
-                    );
-                }
+        // Filter by Search (Columns B and C ONLY)
+        if (value && value.trim() !== '') {
+            const lowerVal = value.toLowerCase();
+            matched = matched.filter(row =>
+                (row.B && row.B.toLowerCase().includes(lowerVal)) ||
+                (row.C && row.C.toLowerCase().includes(lowerVal))
+            );
+        }
 
-                if (date_filter) {
-                    // date_filter is YYYY-MM-DD
-                    // row.I is Jatuh Tempo (DD/MM/YYYY)
-                    const [y, m, d] = date_filter.split('-');
-                    const targetDate = `${d}/${m}/${y}`;
-                    matched = matched.filter(row => row.I == targetDate); // Loose equality in case of type diff
-                }
-            }
+        // Filter by Date
+        if (date_filter) {
+            const [y, m, d] = date_filter.split('-');
+            const targetDate = `${d}/${m}/${y}`;
+            matched = matched.filter(row => row.I == targetDate);
         }
     } else {
         // Default Room
-        const sheet = ss.getSheets()[0];
-        const lastRow = sheet.getLastRow();
-        if (lastRow >= 2) {
-            const rawRows = sheet.getRange("A2:K" + lastRow).getValues();
-            matched = rawRows.map(mapRowDefault);
+        const rawRows = getDataWithCache('Sheet1', 'A2:K');
+        matched = rawRows.map(mapRowDefault);
 
-            // Filter
-            if (value && value.trim() !== '') {
-                const lowerVal = value.toLowerCase();
-                matched = matched.filter(row =>
-                    (row.F && row.F.toLowerCase().includes(lowerVal)) ||
-                    (row.B && row.B.toLowerCase().includes(lowerVal)) ||
-                    (row.C && row.C.toLowerCase().includes(lowerVal))
-                );
-            }
+        // Filter by Search (Columns B and C ONLY)
+        if (value && value.trim() !== '') {
+            const lowerVal = value.toLowerCase();
+            matched = matched.filter(row =>
+                (row.B && row.B.toLowerCase().includes(lowerVal)) ||
+                (row.C && row.C.toLowerCase().includes(lowerVal))
+            );
+        }
 
-            if (date_filter) {
-                // date_filter is YYYY-MM-DD
-                // row.G is Due Date (DD/MM/YYYY)
-                const [y, m, d] = date_filter.split('-');
-                const targetDate = `${d}/${m}/${y}`;
-                matched = matched.filter(row => row.G == targetDate);
-            }
+        // Filter by Date
+        if (date_filter) {
+            const [y, m, d] = date_filter.split('-');
+            const targetDate = `${d}/${m}/${y}`;
+            matched = matched.filter(row => row.G == targetDate);
         }
     }
 
+    // Filter by Reason
+    if (reason_filter === 'filled') {
+        matched = matched.filter(row => row.reason && row.reason.trim() !== '');
+    } else if (reason_filter === 'empty') {
+        matched = matched.filter(row => !row.reason || row.reason.trim() === '');
+    }
+
+    // Pagination
+    const total_records = matched.length;
+    const total_pages = Math.ceil(total_records / pageSize);
+    const current_page = Math.max(1, Math.min(page, total_pages || 1));
+
+    const startIndex = (current_page - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+
+    const paginated_records = matched.slice(startIndex, endIndex);
+
     return responseJSON({
         room_id: roomId,
-        matched_records: matched
+        matched_records: paginated_records,
+        pagination: {
+            total_records,
+            total_pages,
+            current_page,
+            page_size: pageSize
+        }
     });
 }
 
@@ -156,11 +171,13 @@ function handleUpdateRecord(rowRef, body) {
         // In server.js updateReason: `range = ${sheetName}!${cellColumn}${row_ref}`
         // If cellColumn is 'M', that's column 13.
         sheet.getRange(parseInt(rowRef), 13).setValue(new_value);
+        invalidateCache('BA');
     } else {
         // Default
         const sheet = ss.getSheets()[0];
         // Column K is 11.
         sheet.getRange(parseInt(rowRef), 11).setValue(new_value);
+        invalidateCache('Sheet1');
     }
 
     return responseJSON({
@@ -170,17 +187,72 @@ function handleUpdateRecord(rowRef, body) {
     });
 }
 
-function handleGetRecords() {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheets()[0];
-    const lastRow = sheet.getLastRow();
+function handleGetRecords(body) {
+    const { room_id } = body || {}; // Optional room_id
+
+    let rawRows = [];
     let data = [];
-    if (lastRow >= 2) {
-        const rawRows = sheet.getRange("A2:K" + lastRow).getValues();
+
+    if (room_id === 'ba') {
+        rawRows = getDataWithCache('BA', 'B2:M');
+        data = rawRows.map(mapRowBA);
+    } else {
+        // Default to NBOT (Sheet1)
+        rawRows = getDataWithCache('Sheet1', 'A2:K');
         data = rawRows.map(mapRowDefault);
     }
 
     return responseJSON({ records: data });
+}
+
+// --- CACHE HELPERS ---
+
+function getDataWithCache(sheetName, rangeA1) {
+    const cache = CacheService.getScriptCache();
+    const cacheKey = `DATA_${sheetName}`;
+    const cached = cache.get(cacheKey);
+
+    if (cached) {
+        return JSON.parse(cached);
+    }
+
+    // Cache miss
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    let sheet;
+    if (sheetName === 'Sheet1') {
+        sheet = ss.getSheets()[0];
+    } else {
+        sheet = ss.getSheetByName(sheetName);
+    }
+
+    if (!sheet) return [];
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+
+    // Construct range dynamically based on last row to avoid empty rows
+    // rangeA1 input is like "A2:K", we need to append lastRow
+    // Actually, let's just use the columns from input and append lastRow
+    const startColChar = rangeA1.split(':')[0].replace(/[0-9]/g, '');
+    const endColChar = rangeA1.split(':')[1].replace(/[0-9]/g, '');
+    const actualRange = `${startColChar}2:${endColChar}${lastRow}`;
+
+    const values = sheet.getRange(actualRange).getValues();
+
+    try {
+        // Cache for 5 minutes
+        cache.put(cacheKey, JSON.stringify(values), CACHE_EXPIRATION_SEC);
+    } catch (e) {
+        // Ignore cache errors (e.g. size limit)
+        console.error("Cache put failed: " + e.message);
+    }
+
+    return values;
+}
+
+function invalidateCache(sheetName) {
+    const cache = CacheService.getScriptCache();
+    cache.remove(`DATA_${sheetName}`);
 }
 
 // --- HELPERS ---

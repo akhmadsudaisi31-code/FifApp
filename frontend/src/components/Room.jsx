@@ -10,18 +10,30 @@ export default function Room({ room }) {
     const [error, setError] = useState(null);
     const [selectedRecord, setSelectedRecord] = useState(null);
 
+    // Pagination & Filter State
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [reasonFilter, setReasonFilter] = useState('all'); // all, filled, empty
+
     // Debounce search
     useEffect(() => {
         const timer = setTimeout(() => {
-            // Search if query > 1 char OR if date filter is set
-            if (query.length > 1 || dateFilter) {
-                searchRecords(query, dateFilter);
-            } else if (query.length === 0 && !dateFilter) {
-                setRecords([]);
+            // Only search if query is present (User requirement)
+            if (query.trim().length > 0) {
+                setPage(1);
+                searchRecords(query, dateFilter, reasonFilter, 1);
+            } else {
+                setRecords([]); // Clear data if no query
+                setTotalPages(1);
             }
         }, 500);
         return () => clearTimeout(timer);
-    }, [query, dateFilter]);
+    }, [query, dateFilter, reasonFilter]);
+
+    // Fetch on page change (skip if triggered by above effect)
+    useEffect(() => {
+        searchRecords(query, dateFilter, reasonFilter, page);
+    }, [page]);
 
     // Reset selection when query changes or new search performed
     useEffect(() => {
@@ -30,22 +42,28 @@ export default function Room({ room }) {
 
     // Auto-refresh search results every 15s
     useEffect(() => {
-        if ((query.length > 1 || dateFilter) && !selectedRecord) {
+        if (!selectedRecord) {
             const interval = setInterval(() => {
-                // Silent refresh (don't set loading to true)
+                // Silent refresh
                 const refresh = async () => {
                     try {
                         const res = await fetch(`${API_BASE}?action=enter_room&roomId=${room.room_id}`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // GAS prefers text/plain to avoid preflight
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                             body: JSON.stringify({
                                 query_by: 'name',
                                 value: query,
-                                date_filter: dateFilter
+                                date_filter: dateFilter,
+                                page: page,
+                                pageSize: 10,
+                                reason_filter: reasonFilter
                             })
                         });
                         const data = await res.json();
                         setRecords(data.matched_records || []);
+                        if (data.pagination) {
+                            setTotalPages(data.pagination.total_pages);
+                        }
                     } catch (err) {
                         console.error("Auto-refresh failed", err);
                     }
@@ -54,25 +72,29 @@ export default function Room({ room }) {
             }, 15000);
             return () => clearInterval(interval);
         }
-    }, [query, dateFilter, selectedRecord, room.room_id]);
+    }, [query, dateFilter, selectedRecord, room.room_id, page, reasonFilter]);
 
-    const searchRecords = async (val, dateVal) => {
+    const searchRecords = async (val, dateVal, reasonVal, pageNum) => {
         setLoading(true);
         setError(null);
         try {
-            // We now use 'name' as a general search (covers Name, ID1, ID2)
-            // unless user specifically wants ID mode, but general is better for UX
             const res = await fetch(`${API_BASE}?action=enter_room&roomId=${room.room_id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
-                    query_by: 'name', // Backend now searches Name + IDs with this
+                    query_by: 'name',
                     value: val,
-                    date_filter: dateVal
+                    date_filter: dateVal,
+                    page: pageNum,
+                    pageSize: 10,
+                    reason_filter: reasonVal
                 })
             });
             const data = await res.json();
             setRecords(data.matched_records || []);
+            if (data.pagination) {
+                setTotalPages(data.pagination.total_pages);
+            }
         } catch (err) {
             setError("Failed to load records");
         } finally {
@@ -89,22 +111,37 @@ export default function Room({ room }) {
 
             {!selectedRecord ? (
                 <>
-                    <div className="search-bar-container" style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                        <div className="search-bar" style={{ flex: 1 }}>
-                            <input
-                                type="text"
-                                placeholder="Cari Nama atau ID..."
-                                value={query}
-                                onChange={e => setQuery(e.target.value)}
-                            />
-                        </div>
-                        <div className="date-filter">
+                    {/* Search Bar - Full Width Top */}
+                    <div className="search-container" style={{ marginBottom: '1rem' }}>
+                        <input
+                            type="text"
+                            placeholder="Cari Nama atau ID..."
+                            value={query}
+                            onChange={e => setQuery(e.target.value)}
+                            style={{ width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #ddd', fontSize: '1rem' }}
+                        />
+                    </div>
+
+                    {/* Filters - Below Search */}
+                    <div className="filters-container" style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+                        <div className="date-filter" style={{ flex: 1 }}>
                             <input
                                 type="date"
                                 value={dateFilter}
                                 onChange={e => setDateFilter(e.target.value)}
-                                style={{ padding: '0.8rem', borderRadius: '8px', border: '1px solid #ddd' }}
+                                style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #ddd' }}
                             />
+                        </div>
+                        <div className="reason-filter" style={{ flex: 1 }}>
+                            <select
+                                value={reasonFilter}
+                                onChange={e => setReasonFilter(e.target.value)}
+                                style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid #ddd' }}
+                            >
+                                <option value="all">Semua Status</option>
+                                <option value="filled">Sudah Diisi</option>
+                                <option value="empty">Belum Diisi</option>
+                            </select>
                         </div>
                     </div>
                     {loading && <div className="spinner">Searching...</div>}
@@ -142,15 +179,36 @@ export default function Room({ room }) {
                                         </td>
                                     </tr>
                                 ))}
-                                {records.length === 0 && query.length > 1 && !loading && (
+                                {records.length === 0 && !loading && (
                                     <tr>
                                         <td colSpan="6" style={{ textAlign: 'center', padding: '2rem' }}>
-                                            No records found.
+                                            {query.trim().length === 0
+                                                ? "Silakan cari Nama atau ID untuk menampilkan data."
+                                                : "No records found."}
                                         </td>
                                     </tr>
                                 )}
                             </tbody>
                         </table>
+                    </div>
+
+                    {/* Pagination Controls */}
+                    <div className="pagination-controls" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1rem' }}>
+                        <button
+                            disabled={page === 1}
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            className="btn-sm"
+                        >
+                            Previous
+                        </button>
+                        <span>Page {page} of {totalPages}</span>
+                        <button
+                            disabled={page >= totalPages}
+                            onClick={() => setPage(p => p + 1)}
+                            className="btn-sm"
+                        >
+                            Next
+                        </button>
                     </div>
                 </>
             ) : (

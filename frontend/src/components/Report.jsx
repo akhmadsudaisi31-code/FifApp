@@ -24,9 +24,13 @@ export default function Report() {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState('daily'); // daily, weekly, monthly, yearly
+    const [selectedRoom, setSelectedRoom] = useState('nbot'); // nbot, ba
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     const fetchData = () => {
-        fetch(`${API_BASE}?action=get_records`)
+        setLoading(true);
+        fetch(`${API_BASE}?action=get_records&room_id=${selectedRoom}`)
             .then(res => res.json())
             .then(data => {
                 setRecords(data.records);
@@ -42,7 +46,7 @@ export default function Report() {
         fetchData();
         const interval = setInterval(fetchData, 30000); // Refresh every 30s
         return () => clearInterval(interval);
-    }, []);
+    }, [selectedRoom]); // Refetch when room changes
 
     // --- CHART DATA PROCESSING ---
     const chartData = useMemo(() => {
@@ -102,17 +106,50 @@ export default function Report() {
 
     const chartOptions = {
         responsive: true,
+        maintainAspectRatio: false,
+        animation: {
+            duration: 1000,
+            easing: 'easeOutQuart'
+        },
         plugins: {
             legend: { position: 'top' },
             title: { display: true, text: `Records by Period (${period.toUpperCase()})` },
         },
+        scales: {
+            y: {
+                beginAtZero: true,
+                grid: {
+                    color: 'rgba(0, 0, 0, 0.05)'
+                }
+            },
+            x: {
+                grid: {
+                    display: false
+                }
+            }
+        }
     };
+
+    // Pagination Logic
+    const totalPages = Math.ceil(records.length / ITEMS_PER_PAGE);
+    const paginatedRecords = records.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
 
     return (
         <div className="report-view">
             <div className="section-header">
                 <h2>Laporan Rekapitulasi</h2>
-                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                        value={selectedRoom}
+                        onChange={e => { setSelectedRoom(e.target.value); setCurrentPage(1); }}
+                        style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid #ddd', fontWeight: 'bold' }}
+                    >
+                        <option value="nbot">Room NBOT</option>
+                        <option value="ba">Room BA</option>
+                    </select>
                     <select
                         value={period}
                         onChange={e => setPeriod(e.target.value)}
@@ -132,16 +169,23 @@ export default function Report() {
             ) : (
                 <>
                     {/* CHART SECTION */}
-                    <div style={{
+                    {/* CHART SECTION */}
+                    <div className="chart-container" style={{
                         background: 'white',
                         padding: '1.5rem',
                         borderRadius: '0.75rem',
                         marginBottom: '2rem',
-                        boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
                         border: '1px solid #e2e8f0',
-                        height: '300px'
+                        height: '400px', // Taller for better desktop view
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        position: 'relative'
                     }}>
-                        {chartData && <Bar options={chartOptions} data={chartData} />}
+                        <div style={{ width: '100%', height: '100%' }}>
+                            {chartData && <Bar options={chartOptions} data={chartData} />}
+                        </div>
                     </div>
 
                     <div className="table-container">
@@ -157,8 +201,8 @@ export default function Report() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {records && records.length > 0 ? (
-                                    records.map(rec => (
+                                {paginatedRecords && paginatedRecords.length > 0 ? (
+                                    paginatedRecords.map(rec => (
                                         <tr key={rec.row_ref}>
                                             <td data-label="Contract">{rec.contract}</td>
                                             <td data-label="Customer">{rec.customer}</td>
@@ -178,6 +222,27 @@ export default function Report() {
                             </tbody>
                         </table>
                     </div>
+
+                    {/* Pagination Controls */}
+                    {totalPages > 1 && (
+                        <div className="pagination-controls" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem', paddingBottom: '2rem' }}>
+                            <button
+                                disabled={currentPage === 1}
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                className="btn-sm"
+                            >
+                                Previous
+                            </button>
+                            <span>Page {currentPage} of {totalPages}</span>
+                            <button
+                                disabled={currentPage >= totalPages}
+                                onClick={() => setCurrentPage(p => p + 1)}
+                                className="btn-sm"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    )}
                 </>
             )}
         </div>
