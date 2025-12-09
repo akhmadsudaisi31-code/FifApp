@@ -8,6 +8,7 @@ import {
     Tooltip,
     Legend,
 } from 'chart.js';
+import { API_BASE } from '../config';
 import { Bar } from 'react-chartjs-2';
 
 ChartJS.register(
@@ -19,15 +20,13 @@ ChartJS.register(
     Legend
 );
 
-const API_BASE = 'https://fifapp-production.up.railway.app/api';
-
 export default function Report() {
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState('daily'); // daily, weekly, monthly, yearly
 
     const fetchData = () => {
-        fetch(`${API_BASE}/records`)
+        fetch(`${API_BASE}?action=get_records`)
             .then(res => res.json())
             .then(data => {
                 setRecords(data.records);

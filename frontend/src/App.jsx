@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { API_BASE } from './config';
 
 // Components
 import Layout from './components/Layout';
@@ -8,8 +9,6 @@ import Regional from './components/Regional';
 import Room from './components/Room';
 import Report from './components/Report';
 
-const API_BASE = 'https://fifapp-production.up.railway.app/api';
-
 function App() {
   const [view, setView] = useState('home'); // home | regional | room | laporan
   const [selectedRoom, setSelectedRoom] = useState(null);
@@ -17,7 +16,7 @@ function App() {
 
   // Fetch rooms on load
   useEffect(() => {
-    fetch(`${API_BASE}/dashboard/init`)
+    fetch(`${API_BASE}?action=dashboard_init`)
       .then(res => res.json())
       .then(data => setRooms(data.rooms))
       .catch(err => console.error("Failed to init dashboard", err));

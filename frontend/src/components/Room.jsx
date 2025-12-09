@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE = 'https://fifapp-production.up.railway.app/api';
+import { API_BASE } from '../config';
 
 export default function Room({ room }) {
     const [query, setQuery] = useState('');
@@ -35,9 +35,9 @@ export default function Room({ room }) {
                 // Silent refresh (don't set loading to true)
                 const refresh = async () => {
                     try {
-                        const res = await fetch(`${API_BASE}/rooms/${room.room_id}/enter`, {
+                        const res = await fetch(`${API_BASE}?action=enter_room&roomId=${room.room_id}`, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // GAS prefers text/plain to avoid preflight
                             body: JSON.stringify({
                                 query_by: 'name',
                                 value: query,
@@ -62,9 +62,9 @@ export default function Room({ room }) {
         try {
             // We now use 'name' as a general search (covers Name, ID1, ID2)
             // unless user specifically wants ID mode, but general is better for UX
-            const res = await fetch(`${API_BASE}/rooms/${room.room_id}/enter`, {
+            const res = await fetch(`${API_BASE}?action=enter_room&roomId=${room.room_id}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
                     query_by: 'name', // Backend now searches Name + IDs with this
                     value: val,
@@ -176,9 +176,9 @@ function RecordCard({ record, roomId }) {
     const handleSave = async () => {
         setStatus('saving');
         try {
-            const res = await fetch(`${API_BASE}/records/${record.row_ref}/user-input`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+            const res = await fetch(`${API_BASE}?action=update_record&rowRef=${record.row_ref}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
                     row_ref: record.row_ref,
                     id: record.row_ref,
